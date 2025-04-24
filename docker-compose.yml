@@ -1,7 +1,7 @@
 version: "3"
 services:
   qbittorrentee:
-    image: superng6/qbittorrentee
+    image: czyt/qbittorrentee
     container_name: qbittorrentee
     environment:
       - PUID=1026

@@ -61,5 +61,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            superng6/qbittorrentee:${{ steps.set-version.outputs.version }}
-            superng6/qbittorrentee:latest
+            czyt/qbittorrentee:${{ steps.set-version.outputs.version }}
+            czyt/qbittorrentee:latest
