@@ -32,8 +32,13 @@ jobs:
       - name: Set Version
         id: set-version
         run: |
-          echo "::set-output name=version::$(cat ReleaseTag | head -n1)"
-          echo "ReleaseTag=$(cat ReleaseTag | head -n1)"
+          VERSION=$(cat ReleaseTag | head -n1)
+          if [ -z "${VERSION}" ]; then
+            echo "::error::ReleaseTag is empty"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "ReleaseTag=${VERSION}"
 
       # 缓存release tag，用作与下一次执行任务时获取到到release tag做对比
       - name: Cache tag
@@ -49,8 +54,8 @@ jobs:
         if: steps.cache-tag.outputs.cache-hit != 'true'
         run: |
           mkdir -p ./tag
-          echo ${{ steps.set-version.outputs.version }} > ./tag/tag-${{ steps.set-version.outputs.version }}
-          echo "::set-output name=status::success"
+          echo "${{ steps.set-version.outputs.version }}" > ./tag/tag-${{ steps.set-version.outputs.version }}
+          echo "status=success" >> "${GITHUB_OUTPUT}"
 
       # Build and push
       - name: Build and push

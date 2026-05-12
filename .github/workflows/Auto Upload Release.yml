@@ -2,8 +2,11 @@ name: Auto Upload files to release
 
 on:
   workflow_dispatch:
- # schedule:
- # - cron: '30 20 * * *'
+  schedule:
+    - cron: '20 21 * * *'
+
+permissions:
+  contents: write
 
 jobs:
   buildx:
@@ -16,8 +19,13 @@ jobs:
       - name: Set Version
         id: set-version
         run: |
-          echo "::set-output name=version::$(cat ReleaseTag | head -n1)"
-          echo "ReleaseTag=$(cat ReleaseTag | head -n1)"
+          VERSION=$(cat ReleaseTag | head -n1)
+          if [ -z "${VERSION}" ]; then
+            echo "::error::ReleaseTag is empty"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "ReleaseTag=${VERSION}"
 
       # 缓存release tag，用作与下一次执行任务时获取到到release tag做对比
       - name: Cache tag
@@ -33,17 +41,33 @@ jobs:
         if: steps.cache-tag.outputs.cache-hit != 'true'
         run: |
           mkdir -p ./tag
-          echo ${{ steps.set-version.outputs.version }} > ./tag/tag-${{ steps.set-version.outputs.version }}
-          echo "::set-output name=status::success"
+          echo "${{ steps.set-version.outputs.version }}" > ./tag/tag-${{ steps.set-version.outputs.version }}
+          echo "status=success" >> "${GITHUB_OUTPUT}"
 
-      - name: Dowload release
+      - name: Download upstream release
         if: steps.get-release-tag.outputs.status == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir ./qbittorrent
-          cd ./qbittorrent
-          wget -q https://github.com/c0re100/qBittorrent-Enhanced-Edition/releases/download/release-${{ steps.set-version.outputs.version }}/qbittorrent-nox_x86_64-linux-musl_static.zip
-          wget -q https://github.com/c0re100/qBittorrent-Enhanced-Edition/releases/download/release-${{ steps.set-version.outputs.version }}/qbittorrent-nox_arm-linux-musleabi_static.zip
-          wget -q https://github.com/c0re100/qBittorrent-Enhanced-Edition/releases/download/release-${{ steps.set-version.outputs.version }}/qbittorrent-nox_aarch64-linux-musl_static.zip
+          set -euo pipefail
+
+          mkdir -p ./qbittorrent
+          gh release download "release-${{ steps.set-version.outputs.version }}" \
+            --repo c0re100/qBittorrent-Enhanced-Edition \
+            --dir ./qbittorrent \
+            --clobber
+
+      - name: Sync upstream changelog
+        if: steps.get-release-tag.outputs.status == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh release view "release-${{ steps.set-version.outputs.version }}" \
+            --repo c0re100/qBittorrent-Enhanced-Edition \
+            --json body,url \
+            --jq '"Upstream release: " + .url + "\n\n" + (.body // "")' > ./ReleaseNotes.md
 
 
       - name: Upload files to release
@@ -54,6 +78,6 @@ jobs:
         with:
           name: qBittorrent Enhanced Edition v${{ steps.set-version.outputs.version }}
           tag_name: ${{ steps.set-version.outputs.version }}
-          # body_path: Changelog
+          body_path: ./ReleaseNotes.md
           files: |
-            ./qbittorrent/*.zip
+            ./qbittorrent/*

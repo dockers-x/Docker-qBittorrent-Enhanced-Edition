@@ -34,8 +34,13 @@ jobs:
       - name: Set Version
         id: set-version
         run: |
-          echo "::set-output name=version::$(cat ReleaseTag | head -n1)"
-          echo "ReleaseTag=$(cat ReleaseTag | head -n1)"
+          VERSION=$(cat ReleaseTag | head -n1)
+          if [ -z "${VERSION}" ]; then
+            echo "::error::ReleaseTag is empty"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "ReleaseTag=${VERSION}"
 
       # Build and push
       - name: Build and push
@@ -47,4 +52,3 @@ jobs:
           tags: |
             superng6/qbittorrentee:${{ steps.set-version.outputs.version }}
             superng6/qbittorrentee:latest
-

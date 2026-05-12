@@ -1,9 +1,15 @@
 #!/usr/bin/with-contenv bash
 
 UMASK_SET=${UMASK_SET:-022}
+WEBUIPORT=${WEBUIPORT:-8080}
+
+if ! [[ "$WEBUIPORT" =~ ^[0-9]+$ ]] || [ "$WEBUIPORT" -lt 1 ] || [ "$WEBUIPORT" -gt 65535 ]; then
+	echo "WEBUIPORT must be a valid port between 1 and 65535." >&2
+	exit 1
+fi
 
 umask "$UMASK_SET"
 
 # 启动qBittorrent
 exec \
-	s6-setuidgid abc qbittorrent-nox --webui-port=$WEBUIPORT --profile=/config 
+	s6-setuidgid abc qbittorrent-nox --webui-port="${WEBUIPORT}" --profile=/config
