@@ -1,9 +1,6 @@
 #!/bin/bash
+set -euo pipefail
 
-docker build \
-    --build-arg HTTP_PROXY=http://172.17.0.1:7890 \
-    --build-arg HTTPS_PROXY=http://172.17.0.1:7890 \
-    --build-arg NO_PROXY=localhost,127.0.0.1 \
-    --tag superng6/qbittorrentee:latest \
-    --force-rm \
-    .
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+version=$(cat ReleaseTag)
+exec docker build --tag "czyt/qbittorrentee:$version" --tag "czyt/qbittorrentee:$version-r1" --tag czyt/qbittorrentee:latest "$@" .

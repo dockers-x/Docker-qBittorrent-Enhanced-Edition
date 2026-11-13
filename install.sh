@@ -1,27 +1,37 @@
 
-#!/usr/bin/with-contenv bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Check CPU architecture
-ARCH=$(uname -m)
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
-echo -e "${INFO} Check CPU architecture ..."
-if [[ ${ARCH} == "x86_64" ]]; then
-    ARCH="qbittorrent-enhanced-nox_x86_64-linux-musl_static.zip"
-elif [[ ${ARCH} == "armv7l" ]]; then
-    ARCH="qbittorrent-enhanced-nox_arm-linux-musleabi_static.zip"
-elif [[ ${ARCH} == "aarch64" ]]; then
-    ARCH="qbittorrent-enhanced-nox_aarch64-linux-musl_static.zip"    
-else
-    echo -e "${ERROR} This architecture is not supported."
+architecture=${TARGETARCH:-$(uname -m)}
+case "$architecture" in
+    amd64|x86_64) platform=x86_64-linux-musl ;;
+    arm64|aarch64) platform=aarch64-linux-musl ;;
+    arm|armv7l)
+        if [[ -n "${TARGETVARIANT:-}" && "$TARGETVARIANT" != v7 ]]; then
+            echo "Unsupported ARM variant: $TARGETVARIANT" >&2
+            exit 1
+        fi
+        platform=armv7-linux-musleabihf
+        ;;
+    *) echo "Unsupported architecture: $architecture" >&2; exit 1 ;;
+esac
+
+version=$(cat ReleaseTag)
+if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+    echo "ReleaseTag must contain an upstream version, for example 5.2.4.10" >&2
     exit 1
 fi
 
-# Download files
-echo "Downloading binary file: ${ARCH}"
-TAG=$(cat /qbittorrent/ReleaseTag)
-echo "qbittorrent version: ${TAG}"
-curl -L -o ${PWD}/qbittorrentee.zip https://github.com/c0re100/qBittorrent-Enhanced-Edition/releases/download/release-$TAG/$ARCH
+asset="qbittorrent-enhanced-nox_${platform}_static.zip"
+archive=$(mktemp)
+trap 'rm -f "$archive"' EXIT
 
-echo "Download binary file: ${ARCH} completed"
-
-unzip qbittorrentee.zip
+echo "Downloading qBittorrent Enhanced Edition $version ($platform)"
+curl --fail --location --retry 3 --connect-timeout 30 --max-time 600 \
+    --output "$archive" \
+    "https://github.com/c0re100/qBittorrent-Enhanced-Edition/releases/download/release-$version/$asset"
+unzip -p "$archive" qbittorrent-nox > qbittorrent-nox
+test -s qbittorrent-nox
+chmod 755 qbittorrent-nox

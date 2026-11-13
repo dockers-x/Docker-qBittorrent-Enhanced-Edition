@@ -1,17 +1,24 @@
-version: "3"
 services:
   qbittorrentee:
-    image: superng6/qbittorrentee
-    container_name: qbittorrentee
+    image: czyt/qbittorrentee:latest
     environment:
       - PUID=1026
       - PGID=100
       - TZ=Asia/Shanghai
       - WEBUIPORT=8080
-      - ENABLE_DOWNLOADS_PERM_FIX=true
+      - ENABLE_CONFIG_PERM_FIX=true
+      - ENABLE_DOWNLOADS_PERM_FIX=false
     volumes:
-      - ./qbittorrentee/config:/config
-      - ./qbittorrentee/downloads:/downloads
+      - type: bind
+        source: ./qbittorrentee/config
+        target: /config
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./qbittorrentee/downloads
+        target: /downloads
+        bind:
+          create_host_path: false
     ports:
       - 6881:6881
       - 6881:6881/udp

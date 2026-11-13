@@ -1,241 +1,102 @@
-## 支持群晖、威联通等x64、arm64、arm32平台nas
-博客：https://sleele.com/2020/01/09/docker-qbittorrent增强版，反迅雷吸血  
-GitHub：https://github.com/SuperNG6/Docker-qBittorrent-Enhanced-Edition  
+# qBittorrent Enhanced Edition Docker
 
+基于官方 Alpine 和上游静态二进制，支持 `amd64`、`arm64`、`arm/v7`。镜像为 `czyt/qbittorrentee`。
 
-[https://hub.docker.com/r/superng6/qbittorrentee](https://hub.docker.com/r/superng6/qbittorrentee)
+保留默认登录信息 **`admin / adminadmin`**，建议部署时设置自己的凭据，不要直接暴露到公网。
 
-### 感谢以下项目:
-[https://github.com/qbittorrent/qBittorrent](https://github.com/qbittorrent/qBittorrent)   
-[https://github.com/c0re100/qBittorrent-Enhanced-Edition](https://github.com/c0re100/qBittorrent-Enhanced-Edition)    
-[https://github.com/ngosang/trackerslist]( https://github.com/ngosang/trackerslist)
+## 快速启动
 
+```bash
+mkdir -p ./qbittorrentee/config ./qbittorrentee/downloads
+sudo chown -R "$(id -u):$(id -g)" ./qbittorrentee
+```
 
-###  其他项目 Docker qBittorrent 中国优化版
-https://github.com/SuperNG6/docker-qbittorrent
-https://hub.docker.com/r/superng6/qbittorrent
+编辑 `docker-compose.yml`，把 `PUID`、`PGID` 改为上述用户的 UID/GID，然后运行 `docker compose up -d`，访问 `http://宿主机IP:8080`。
 
-# 本镜像的一些优点
-- 全平台架构`x86-64`、`arm64`、`armhf`
-- 静态编译qbittorrentee
-- 做了usermapping，使用你自己的账户权限来运行，这点对于群辉来说尤其重要
-- 纯qBittorrent-Enhanced-Edition，没有包含多于的服务
-- 默认上海时区 Asia/Shanghai
-- qBittorrent-Enhanced-Edition屏蔽吸血客户端
-- 内置优化过的conf文件，减少手工设置
-- 默认中文
-- 内置400条tracker方便在连接GitHub出错时使用
-- 自动向所有tracker服务器汇报，加快下载速度，提升连接数
-- 提供了自定义用户名密码功能
+Compose 使用长格式 bind mount 和 `create_host_path: false`，路径不存在会直接报错，不会让 Docker 自动在错误位置创建目录。
 
-# Architecture
-### qBittorrent Enhanced Edition latest
+## 环境变量
 
-| Architecture | Tag            |
-| ------------ | -------------- |
-| x86-64       | latest   |
-| arm64        | latest |
-| armhf        | latest |
+以下变量均由当前 Dockerfile 或启动脚本实际实现：
 
+| 变量 | 默认值 | 行为 |
+| --- | --- | --- |
+| `PUID` | `1000` | 默认模式下运行 qBittorrent 的数字 UID |
+| `PGID` | `1000` | 默认模式下运行 qBittorrent 的数字 GID |
+| `RUN_AS_ROOT` | `false` | 为 `true` 时不降权，以 root 运行，忽略 PUID/PGID；容器必须以 root 启动 |
+| `UMASK_SET` | `022` | 新建文件权限掩码，三位或四位八进制 |
+| `WEBUIPORT` | `8080` | WebUI 监听端口，范围 1–65535；端口映射须同步调整 |
+| `TZ` | `Asia/Shanghai` | 时区 |
+| `ENABLE_CONFIG_PERM_FIX` | `true` | root 启动时递归调整 `/config` 的 owner 为实际运行 UID/GID |
+| `ENABLE_DOWNLOADS_PERM_FIX` | `false` | root 启动时递归调整 `/downloads` 的 owner；托管文稿目录应关闭 |
+| `WEBUI_USERNAME` | 不设置 | 覆盖 WebUI 登录用户名 |
+| `WEBUI_PASSWORD` | 不设置 | 覆盖 WebUI 密码，生成 PBKDF2-SHA512 哈希，不将明文写入配置 |
+| `WEBUI_PASSWORD_FILE` | 不设置 | 从容器内 UTF-8 文件读取密码，去除结尾换行 |
 
-# Changelogs
-## 2025/08/17
+兼容旧名称 `WEB_PASSWORD`、`WEB_PASSWORD_FILE`，分别等价于密码及密码文件。四种密码来源只允许设置一种，冲突或空密码会中止启动。不再声明旧文档中没有实现的其他密码变量。
 
-    1、更新 base image，增加curl
-    2、update qBittorrent Enhanced Edition v5.1.2.10
+不设置凭据变量时保留已有配置；只有全新配置使用 `admin / adminadmin`。用户名与密码可以分别覆盖。只要保留相应环境变量，每次启动都会重新应用，因此应通过部署配置改密，而不是只在 WebUI 中改密。
 
-## 2025/03/11
+### 自定义登录信息
 
-    1、更新 base image，增加curl
-    2、新增 ENABLE_DOWNLOADS_PERM_FIX变量（默认`ENABLE_DOWNLOADS_PERM_FIX=true`）：
-    当`=true`时，则对`/downloads`文件夹进行权限修复；
-    当`=false`时，则不对`/downloads`文件夹进行权限修复；
+在 Compose 的 `environment` 中添加：
 
-## 2025/02/18
+```yaml
+      - WEBUI_USERNAME=myadmin
+      - WEBUI_PASSWORD=replace-with-a-strong-password
+```
 
-    1、更新 base image
-    2、回退 s6-overlay V2，V3太复杂了
-    3、默认对/config /downloads 执行chown权限设置，避免部分小白遇到读写问题
+也可挂载密码文件并设置 `WEBUI_PASSWORD_FILE=/run/secrets/qbittorrent_password`，不要同时设置明文密码变量。密码不会输出到启动日志，但环境变量和配置仍需按敏感信息管理。
 
-## 2024/09/10
+### root 兼容模式
 
-    1、更新 base image
-    2、更新 s6-overlay V3 @ssfdust
-    3、增加 healtcheck script @ssfdust
+默认由 root 初始化目录，再通过 `su-exec` 切换到 PUID/PGID；不再依赖基础镜像中的 `abc` 用户或 s6 隐式初始化。`tini` 负责信号转发和子进程回收。
 
-    新增环境变量 @ssfdust
-    WEB_PASSWORD=veryscrect	web密码环境变量
-    WEB_PASSWORD_FILE=/path/to/secrets	web密码文件环境变量
-    WEB_PBKDF2_PASSWORD=@Bytes(...)	web密码密文环境变量
-    WEB_PBKDF2_PASSWORD_FILE=/path/to/secrets	web密码密文文件环境变量
+外层只写 `user: root` **不会**关闭默认降权，需要显式配置：
 
-    4、感谢 @ssfdust PR
-    
-## 2021/04/15
-
-    1、增加了大量历史版本，详情请见 docker hub tags
-    https://hub.docker.com/r/superng6/qbittorrentee/tags?page=1&ordering=last_updated
-
-## 2021/02/07
-
-    1、qBittorrent Enhanced Edition update to v4.3.3.10
-
-## 2020/11/30
-
-    1、自动同步更新最新版本qBittorrent Enhanced Edition
-
-## 2020/11/06
-
-    1、qBittorrent Enhanced Edition update to v4.3.0.10
-    2、x86-64、arm64、armhf由自编译转为官方静态编译版
-    3、减小镜像体积
-
-## 2020/09/08
-
-    1、qBittorrent Enhanced Edition update to v4.2.5.16
-
-## 2020/09/07
-    1、qBittorrent Enhanced Edition update to v4.2.5.15
-    2、libtorrent update to 1.2.10-0f0afec8c (Fix #127)
-    3、Optional Button for re-enable Torrent IP Filter (Tools>Enable Torrent IP Filter).
-
-## 2020/08/21
-
-    1、更新LIBTORRENT v1.2.8，QBITTORRENT v4.2.5.13
-    2、更新base image
-    3、没别的更新了，已经很完善了
-
-## 2020/01/13
-
-      1、构建全平台架构镜像`x86-64`、`arm64`、`armhf`
-      2、设置磁盘缓存，默认参数`x86-64:512M`、`arm64:128M`、`armhf:64M`
-      
-## 2020/01/12
-
-      1、默认缓存设置参数为 x86-64:512M、arm64:64M，提升下载性能
-      2、除了自动更新tracker外，内置400多条tracker，默认启用，以便于在GitHub连接有问题时使用
-
-## 2020/01/06
-
-      1、修改conf，优化参数，减少手动设置
-      2、自动下载并更新tracker list
-      3、默认中文
-      4、基于qBittorrent-Enhanced-Edition 4.1.9.15 最新版的SSL有问题
-      
-# 内外网访问
-webui端口不一致的情况下，请手动关闭如下选项（默认配置已关闭，如未关闭请手动关闭）  
-https://cdn.jsdelivr.net/gh/SuperNG6/pic@master/uPic/2021-02-02/CIwC4l.png
-该操作等价于修改配置文件中的如下选项  
-````
-WebUI\CSRFProtection=false
-WebUI\ClickjackingProtection=false
-WebUI\HostHeaderValidation=false
-````
-
-## 关于群晖
-
-群晖用户请使用你当前的用户SSH进系统，输入 ``id 你的用户id`` 获取到你的UID和GID并输入进去
-
-![rNyFsw](https://cdn.jsdelivr.net/gh/SuperNG6/pic@master/uPic/rNyFsw.jpg)
-
-### 权限管理设置
-对你的``docker配置文件夹的根目录``进行如图操作，``你的下载文件夹的根目录``进行相似操作，去掉``管理``这个权限，只给``写入``,``读取``权限  
-![HEmuK1](https://cdn.jsdelivr.net/gh/SuperNG6/pic@master/uPic/HEmuK1.jpg)
-
-### docker命令行设置：
-
-
-1. 创建qbittorrent容器
-
-````
-docker create  \
-    --name=qbittorrentee  \
-    -e WEBUIPORT=8080  \
-    -e PUID=1026 \
-    -e PGID=100 \
-    -e TZ=Asia/Shanghai \
-    -e ENABLE_DOWNLOADS_PERM_FIX=true \
-    -p 6881:6881  \
-    -p 6881:6881/udp  \
-    -p 8080:8080  \
-    -v /配置文件位置:/config  \
-    -v /下载位置:/downloads  \
-    --restart unless-stopped  \
-    superng6/qbittorrentee:latest
-````
-
-### docker-compose
-````
-version: "3"
-services:
-  qbittorrentee:
-    image: superng6/qbittorrentee
-    container_name: qbittorrentee
+```yaml
     environment:
-      - PUID=1026
-      - PGID=100
-      - TZ=Asia/Shanghai
-      - WEBUIPORT=8080
-      - ENABLE_DOWNLOADS_PERM_FIX=true
-    volumes:
-      - ./qbittorrentee/config:/config
-      - ./qbittorrentee/downloads:/downloads
-    ports:
-      - 6881:6881
-      - 6881:6881/udp
-      - 8080:8080
-    restart: unless-stopped
-````
+      - RUN_AS_ROOT=true
+      - ENABLE_CONFIG_PERM_FIX=false
+      - ENABLE_DOWNLOADS_PERM_FIX=false
+```
 
-[![Powered by DartNode](https://dartnode.com/branding/DN-Open-Source-sm.png)](https://dartnode.com "Powered by DartNode - Free VPS for Open Source")
+镜像默认以 root 启动，无需额外设置 `user: root`。外层指定非 root 用户时直接以该 UID/GID 运行，不切换身份或执行 chown；此时不能同时设置 `RUN_AS_ROOT=true`。
 
-### 变量:
+root 模式拥有更大的文件访问范围，但不能绕过宿主机 ACL。不要为解决普通目录权限问题启用 `privileged` 或 `chmod 777`。
 
-|参数|说明|
-|-|:-|
-| `--name=qbittorrentee` |容器名|
-| `-p 8080:8080` |web访问端口 [IP:8080](IP:8080);(默认用户名:admin;默认密码为随机生成，首次启动容器请查看日志);此端口需与容器端口和环境变量保持一致，否则无法访问|
-| `-p 6881:6881` |BT下载监听端口|
-| `-p 6881:6881/udp` |BT下载DHT监听端口
-| `-v /配置文件位置:/config` |qBittorrent配置文件位置|
-| `-v /下载位置:/downloads` |qBittorrent下载位置|
-| `-e WEBUIPORT=8080` |web访问端口环境变量|
-| `-e ENABLE_DOWNLOADS_PERM_FIX=true` |/downloads文件夹权限修复|
-| `-e TZ=Asia/Shanghai` |系统时区设置,默认为Asia/Shanghai|
+## 懒猫多实例挂载
 
+`error while creating mount source path ... document/下载 ... operation not permitted` 表示 Docker 创建宿主机 bind mount 源目录失败，发生在容器启动之前。镜像内的 root、PUID/PGID、chown 都尚未执行，无法修复这个阶段的错误。
 
-### 群晖docker设置：
+- `/config` 绑定应用数据 `/lzcapp/var/config`。
+- 多实例文稿绑定 `/lzcapp/documents/{{ .S.DeployUID }}/下载目录:/downloads`，不能直接在文稿根目录创建“下载”目录。
+- 声明 `document.private` 权限，不硬编码 `/lzc...` 系统内部路径。
+- 使用 root 兼容模式时关闭两项权限修复，不递归 chown 托管文稿目录。
+- 旧数据不会自动迁移，修改挂载前备份并确认文件所属用户。
 
-1. 卷
+这些设置属于懒猫应用项目，不是 Dockerfile。本仓库不包含 LPK 打包、免密登录或文件选择器拦截。
 
-|参数|说明|
-|-|:-|
-| `本地文件夹1:/downloads` |qBittorrent下载位置|
-| `本地文件夹2:/config` |qBittorrent配置文件位置|
+## 自动发布
 
-2. 端口
+只保留 `.github/workflows/release.yml`，替代原五个定时/手动任务：
 
-|参数|说明|
-|-|:-|
-| `本地端口1:6881` |BT下载监听端口|
-| `本地端口2:6881/udp` |BT下载DHT监听端口|
-| `本地端口3:8080` |web访问端口 [IP:8080](IP:8080);(默认用户名:admin;默认密码:adminadmin);此端口需与容器端口和环境变量保持一致，否则无法访问|
+1. 每天 **21:00 UTC（北京时间次日 05:00）**检查上游最新正式 GitHub Release，不使用未发布的 Git tag。
+2. 更新并提交 `ReleaseTag`，在同一工作流直接构建，不依赖机器人提交再次触发 Actions。
+3. 推送三架构镜像：版本标签、`<版本>-r1`、`latest`、`sha-<完整提交SHA>`。
+4. 镜像推送成功后才创建本仓库版本 Git tag 和 GitHub Release，包含上游更新说明；不重复上传上游安装包。
+5. 定时执行发现版本已有正式 Release 时跳过；失败时没有成功标记，下次重试。手动运行始终构建，可关闭 `check_upstream` 重建当前 `ReleaseTag`。
 
-3. 环境变量：
+`-r1` 专门标识本次重写后的镜像，供懒猫跟踪，避免误用已有同版本旧镜像。未来同版本重建可能覆盖版本标签，需要严格固定时使用 digest 或 SHA 标签。
 
-|参数|说明|
-|-|:-|
-| `TZ=Asia/Shanghai` |系统时区设置,默认为Asia/Shanghai|
-| `WEBUIPORT=8080` |web访问端口环境变量|
-| `-e ENABLE_DOWNLOADS_PERM_FIX=true` |/downloads文件夹权限修复，默认开启，false关闭|
+推送 `master` 的镜像相关代码也会构建；更改默认分支时须同步调整 `push.branches`。仓库须允许 Actions 写入内容，并配置 **`DOCKERHUB_TOKEN`** Secret（对 `czyt/qbittorrentee` 有推送权限）。用户名固定 `czyt`，不需要 `DOCKERHUB_USERNAME`。
 
-### 搜索：
+## 本地构建
 
-#### 开启：视图-搜索引擎:
-##### 说明：
+运行 `./build.sh`，读取 `ReleaseTag`，构建当前架构镜像并设置版本、`-r1`、`latest` 标签。额外 Docker build 参数可传给脚本，不再硬编码代理。下载失败立即退出，不把 HTTP 错误页打包成二进制。
 
-1. 自带 [http://plugins.qbittorrent.org/](http://plugins.qbittorrent.org/) 部分搜索插件
-2. 全新安装默认只开启官方自带部分和一个中文搜索插件。其它可到 视图-搜索引擎-界面右侧搜索-搜索插件-启动栏(双击)开启
-3. 一些搜索插件网站需过墙才能用
-4. jackett搜索插件需配置jackett.json(位置config/qBittorrent/data/nova3/engines)，插件需配合jackett服务的api_key。可自行搭建docker版jackett(例如linuxserver/jackett)。
+目录：`/config` 保存配置、任务状态和搜索插件，`/downloads` 保存下载文件。端口：WebUI `8080/TCP`，BT `6881/TCP+UDP`。
 
+## 致谢
+
+感谢 qBittorrent、qBittorrent Enhanced Edition 及 SuperNG6 原镜像项目。本仓库保留原项目配置和搜索插件基础。

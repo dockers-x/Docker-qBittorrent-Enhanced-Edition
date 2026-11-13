@@ -1,35 +1,41 @@
-FROM superng6/alpine:3.22 AS builder
-LABEL maintainer="SuperNG6"
+FROM alpine:3.22 AS builder
+
+ARG TARGETARCH
+ARG TARGETVARIANT
 
 WORKDIR /qbittorrent
 
-COPY install.sh /qbittorrent/
-COPY ReleaseTag /qbittorrent/
+RUN apk add --no-cache bash ca-certificates curl unzip
 
-RUN apk add --no-cache ca-certificates curl jq
+COPY install.sh ReleaseTag ./
 
-RUN cd /qbittorrent \
-	&& chmod a+x install.sh \
-	&& bash install.sh
+RUN bash install.sh
 
-# docker qBittorrent-Enhanced-Edition
+FROM alpine:3.22
 
-FROM superng6/alpine:3.22
-
-# environment settings
 ENV TZ=Asia/Shanghai \
+    HOME=/config \
+    PUID=1000 \
+    PGID=1000 \
+    UMASK_SET=022 \
     WEBUIPORT=8080 \
-    ENABLE_DOWNLOADS_PERM_FIX=true
+    RUN_AS_ROOT=false \
+    ENABLE_CONFIG_PERM_FIX=true \
+    ENABLE_DOWNLOADS_PERM_FIX=false
 
-# add local files and install qbitorrent
+RUN apk add --no-cache bash ca-certificates python3 su-exec tini tzdata \
+    && addgroup -g 1000 qbittorrent \
+    && adduser -D -H -u 1000 -G qbittorrent qbittorrent \
+    && mkdir -p /config /downloads \
+    && chown 1000:1000 /config /downloads
+
 COPY root /
-COPY --from=builder /qbittorrent/qbittorrent-nox /usr/local/bin/qbittorrent-nox
+COPY --from=builder --chmod=755 /qbittorrent/qbittorrent-nox /usr/local/bin/qbittorrent-nox
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY configure-webui.py /usr/local/lib/qbittorrent/configure-webui.py
 
-# install python3
-RUN  apk add --no-cache python3 \
-    && rm -rf /var/cache/apk/*  \
-    && chmod a+x /usr/local/bin/qbittorrent-nox  
-
-# ports and volumes
-VOLUME /downloads /config
+VOLUME ["/downloads", "/config"]
 EXPOSE 8080 6881 6881/udp
+
+ENTRYPOINT ["/sbin/tini", "-g", "--", "/usr/local/bin/docker-entrypoint.sh"]
+CMD ["qbittorrent-nox"]

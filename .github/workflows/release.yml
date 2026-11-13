@@ -1,0 +1,122 @@
+name: Update and publish
+
+on:
+  schedule:
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+    inputs:
+      check_upstream:
+        description: Check upstream first (disable to rebuild ReleaseTag)
+        type: boolean
+        default: true
+  push:
+    branches: [master]
+    paths:
+      - ReleaseTag
+      - Dockerfile
+      - install.sh
+      - docker-entrypoint.sh
+      - configure-webui.py
+      - root/**
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+      build: ${{ steps.version.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Select version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          CHECK_UPSTREAM: ${{ inputs.check_upstream }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cat ReleaseTag)
+          if [[ "$EVENT_NAME" == schedule || "$CHECK_UPSTREAM" == true ]]; then
+            upstream_tag=$(gh api repos/c0re100/qBittorrent-Enhanced-Edition/releases/latest --jq .tag_name)
+            [[ "$upstream_tag" == release-* ]] || { echo 'Unexpected upstream tag' >&2; exit 1; }
+            version=${upstream_tag#release-}
+          fi
+          [[ "$version" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || { echo 'Invalid ReleaseTag' >&2; exit 1; }
+          printf '%s\n' "$version" > ReleaseTag
+          if ! git diff --quiet -- ReleaseTag; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add ReleaseTag
+            git commit -m "Update upstream to $version"
+            git push origin "HEAD:${{ github.event.repository.default_branch }}"
+          fi
+          build=true
+          if [[ "$EVENT_NAME" == schedule ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+            if jq -e --arg version "$version" 'any(.[]; .tag_name == $version and .draft == false)' "$RUNNER_TEMP/releases.json" > /dev/null; then
+              build=false
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "Version: $version; build: $build"
+
+  publish:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: czyt
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: |
+            czyt/qbittorrentee:${{ needs.prepare.outputs.version }}
+            czyt/qbittorrentee:${{ needs.prepare.outputs.version }}-r1
+            czyt/qbittorrentee:latest
+            czyt/qbittorrentee:sha-${{ needs.prepare.outputs.commit }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Publish repository release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          set -euo pipefail
+          gh release view "release-$VERSION" --repo c0re100/qBittorrent-Enhanced-Edition \
+            --json body,url --jq '"Upstream: " + .url + "\n\n" + (.body // "")' > "$RUNNER_TEMP/notes.md"
+          printf '\n\nDocker image: `czyt/qbittorrentee:%s`\nBuild: `czyt/qbittorrentee:sha-%s`\n' "$VERSION" "$RELEASE_COMMIT" >> "$RUNNER_TEMP/notes.md"
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          if ! jq -e --arg version "$VERSION" 'any(.[]; .tag_name == $version and .draft == false)' "$RUNNER_TEMP/releases.json" > /dev/null; then
+            gh release create "$VERSION" --target "$RELEASE_COMMIT" \
+              --title "qBittorrent Enhanced Edition $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
