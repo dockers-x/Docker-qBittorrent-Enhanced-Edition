@@ -105,6 +105,57 @@ jobs:
             czyt/qbittorrentee:sha-${{ needs.prepare.outputs.commit }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Verify WebUI login and runtime identity
+        env:
+          IMAGE: czyt/qbittorrentee:sha-${{ needs.prepare.outputs.commit }}
+        run: |
+          set -euo pipefail
+          cleanup() {
+            for mode in default custom root; do
+              docker rm --force --volumes "qbittorrent-smoke-$mode" >/dev/null 2>&1 || true
+            done
+          }
+          trap cleanup EXIT
+          for mode in default custom root; do
+            args=()
+            expected_uid=1000
+            if [[ "$mode" != default ]]; then
+              args+=(--env WEBUI_USERNAME=smoke-admin --env WEBUI_PASSWORD=smoke-password)
+            fi
+            if [[ "$mode" == root ]]; then
+              args+=(--env RUN_AS_ROOT=true --env ENABLE_CONFIG_PERM_FIX=false --env ENABLE_DOWNLOADS_PERM_FIX=false)
+              expected_uid=0
+            fi
+            container="qbittorrent-smoke-$mode"
+            docker run --detach --network none --name "$container" "${args[@]}" "$IMAGE"
+            if ! docker exec -i "$container" python3 - <<'PY'
+          import os
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          credentials = urllib.parse.urlencode({
+              "username": os.environ.get("WEBUI_USERNAME", "admin"),
+              "password": os.environ.get("WEBUI_PASSWORD", "adminadmin"),
+          }).encode()
+          for attempt in range(60):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8080/api/v2/auth/login", data=credentials, timeout=2) as response:
+                      assert response.read() == b"Ok.", "WebUI rejected configured credentials"
+                      break
+              except (urllib.error.URLError, TimeoutError):
+                  time.sleep(1)
+          else:
+              raise SystemExit("WebUI did not become ready")
+          PY
+            then
+              docker logs "$container"
+              exit 1
+            fi
+            actual_uid=$(docker exec "$container" python3 -c 'from pathlib import Path; print(next(line.split()[1] for path in Path("/proc").glob("[0-9]*/status") if path.parent.joinpath("comm").read_text().strip() == "qbittorrent-nox" for line in path.read_text().splitlines() if line.startswith("Uid:")))')
+            [[ "$actual_uid" == "$expected_uid" ]] || { echo "Unexpected UID: $actual_uid" >&2; exit 1; }
+            echo "Verified $mode login and UID $actual_uid"
+          done
       - name: Publish repository release
         env:
           GH_TOKEN: ${{ github.token }}
