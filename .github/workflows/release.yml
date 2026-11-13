@@ -143,9 +143,24 @@ jobs:
           client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
           for attempt in range(60):
               try:
+                  with urllib.request.urlopen("http://127.0.0.1:8080/api/v2/app/version", timeout=2) as response:
+                      raise SystemExit("Unauthenticated API access succeeded; authentication must be enabled")
+              except urllib.error.HTTPError as error:
+                  if error.code in (401, 403):
+                      break
+                  if error.code != 503:
+                      raise
+              except (urllib.error.URLError, TimeoutError):
+                  pass
+              time.sleep(1)
+          else:
+              raise SystemExit("Protected WebUI API did not become ready")
+          for attempt in range(60):
+              try:
                   with client.open("http://127.0.0.1:8080/api/v2/auth/login", data=credentials, timeout=2) as response:
                       body = response.read()
-                      has_session = any(cookie.name == "SID" for cookie in cookies)
+                      session_names = {"SID", "QBT_SID_" + os.environ.get("WEBUIPORT", "8080")}
+                      has_session = any(cookie.name in session_names for cookie in cookies)
                       if response.status == 202 and not has_session:
                           time.sleep(1)
                           continue
