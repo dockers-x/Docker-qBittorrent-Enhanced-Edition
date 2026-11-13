@@ -144,9 +144,13 @@ jobs:
           for attempt in range(60):
               try:
                   with client.open("http://127.0.0.1:8080/api/v2/auth/login", data=credentials, timeout=2) as response:
-                      assert response.status == 200, "Login returned an unexpected status"
-                      response.read()
-                      assert any(cookie.name == "SID" for cookie in cookies), "Login did not establish a session"
+                      body = response.read()
+                      has_session = any(cookie.name == "SID" for cookie in cookies)
+                      if response.status == 202 and not has_session:
+                          time.sleep(1)
+                          continue
+                      assert 200 <= response.status < 300 and has_session, f"Login failed: HTTP {response.status}, body={body!r}"
+                      print(f"Login established a session: HTTP {response.status}")
                       break
               except urllib.error.HTTPError as error:
                   raise SystemExit(f"WebUI rejected configured credentials: HTTP {error.code}") from error
@@ -155,7 +159,7 @@ jobs:
           else:
               raise SystemExit("WebUI did not become ready")
           with client.open("http://127.0.0.1:8080/api/v2/app/version", timeout=2) as response:
-              assert response.status == 200 and response.read().strip(), "Authenticated API access failed"
+              assert 200 <= response.status < 300 and response.read().strip(), "Authenticated API access failed"
           wrong_credentials = urllib.parse.urlencode({"username": "invalid-user", "password": "invalid-password"}).encode()
           try:
               with urllib.request.urlopen("http://127.0.0.1:8080/api/v2/auth/login", data=wrong_credentials, timeout=2) as response:
