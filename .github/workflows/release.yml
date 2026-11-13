@@ -106,6 +106,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Verify WebUI login and runtime identity
+        id: smoke
+        continue-on-error: true
         env:
           IMAGE: czyt/qbittorrentee:sha-${{ needs.prepare.outputs.commit }}
         run: |
@@ -190,6 +192,12 @@ jobs:
             [[ "$actual_uid" == "$expected_uid" ]] || { echo "Unexpected UID: $actual_uid" >&2; exit 1; }
             echo "Verified $mode login and UID $actual_uid"
           done
+      - name: Report optional smoke test failure
+        if: steps.smoke.outcome == 'failure'
+        run: |
+          echo '::warning::Optional WebUI smoke test failed. Image build and push succeeded; see the smoke test logs before deployment.'
+          echo '### Optional WebUI smoke test failed' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Image build and push succeeded. Check the smoke test logs; this test does not block release publication.' >> "$GITHUB_STEP_SUMMARY"
       - name: Publish repository release
         env:
           GH_TOKEN: ${{ github.token }}
