@@ -130,6 +130,7 @@ jobs:
             docker run --detach --network none --name "$container" "${args[@]}" "$IMAGE"
             if ! docker exec -i "$container" python3 - <<'PY'
           import os
+          import http.cookiejar
           import time
           import urllib.error
           import urllib.parse
@@ -138,15 +139,29 @@ jobs:
               "username": os.environ.get("WEBUI_USERNAME", "admin"),
               "password": os.environ.get("WEBUI_PASSWORD", "adminadmin"),
           }).encode()
+          cookies = http.cookiejar.CookieJar()
+          client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
           for attempt in range(60):
               try:
-                  with urllib.request.urlopen("http://127.0.0.1:8080/api/v2/auth/login", data=credentials, timeout=2) as response:
-                      assert response.read() == b"Ok.", "WebUI rejected configured credentials"
+                  with client.open("http://127.0.0.1:8080/api/v2/auth/login", data=credentials, timeout=2) as response:
+                      assert response.status == 200, "Login returned an unexpected status"
+                      response.read()
+                      assert any(cookie.name == "SID" for cookie in cookies), "Login did not establish a session"
                       break
+              except urllib.error.HTTPError as error:
+                  raise SystemExit(f"WebUI rejected configured credentials: HTTP {error.code}") from error
               except (urllib.error.URLError, TimeoutError):
                   time.sleep(1)
           else:
               raise SystemExit("WebUI did not become ready")
+          with client.open("http://127.0.0.1:8080/api/v2/app/version", timeout=2) as response:
+              assert response.status == 200 and response.read().strip(), "Authenticated API access failed"
+          wrong_credentials = urllib.parse.urlencode({"username": "invalid-user", "password": "invalid-password"}).encode()
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8080/api/v2/auth/login", data=wrong_credentials, timeout=2) as response:
+                  assert response.read() == b"Fails.", "Invalid credentials were not rejected"
+          except urllib.error.HTTPError as error:
+              assert error.code in (401, 403), f"Unexpected failed-login status: {error.code}"
           PY
             then
               docker logs "$container"
